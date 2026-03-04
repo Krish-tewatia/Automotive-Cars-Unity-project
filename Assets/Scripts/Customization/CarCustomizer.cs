@@ -14,6 +14,7 @@ public class CarCustomizer : MonoBehaviour
     public Renderer[] headlightRenderers;   // Headlights
     public Renderer[] interiorRenderers;    // Interior parts
     public Renderer[] brakeCalliperRenderers; // Brake callipers
+    public Renderer[] tireRenderers;         // Tires (usually stay dark)
 
     [Header("Wheel Prefabs")]
     public GameObject[] wheelPrefabs;       // Different wheel styles
@@ -208,11 +209,15 @@ public class CarCustomizer : MonoBehaviour
         ApplyColorToRenderers(headlightRenderers, config.headlightColor);
         ApplyColorToRenderers(interiorRenderers, config.interiorColor);
         ApplyColorToRenderers(brakeCalliperRenderers, config.brakeCalliperColor);
+        
+        // Fixed tires (dark grey) to ensure they are visible and distinct from rims
+        ApplyColorToRenderers(tireRenderers, new Color(0.12f, 0.12f, 0.14f), 0.1f, 0.3f);
 
         // Apply emission if any
         if (config.emissionIntensity > 0)
         {
             ApplyEmission(bodyRenderers, config.emissionColor, config.emissionIntensity);
+            ApplyEmission(interiorRenderers, config.interiorColor, 0.5f); // Subdued interior glow
         }
     }
 
@@ -224,25 +229,34 @@ public class CarCustomizer : MonoBehaviour
         {
             if (rend == null) continue;
 
-            // Create material instance to avoid affecting other objects
-            Material mat = rend.material;
+            // Accessing .materials (plural) creates/returns a copy of ALL material instances for this renderer
+            Material[] mats = rend.materials;
 
-            // Try URP/HDRP property first, then Standard
-            if (mat.HasProperty(BaseColorID))
-                mat.SetColor(BaseColorID, color);
-            else if (mat.HasProperty(ColorID))
-                mat.SetColor(ColorID, color);
-
-            if (metallic >= 0 && mat.HasProperty(MetallicID))
-                mat.SetFloat(MetallicID, metallic);
-
-            if (smoothness >= 0)
+            for (int i = 0; i < mats.Length; i++)
             {
-                if (mat.HasProperty(SmoothnessID))
-                    mat.SetFloat(SmoothnessID, smoothness);
-                else if (mat.HasProperty(GlossinessID))
-                    mat.SetFloat(GlossinessID, smoothness);
+                Material mat = mats[i];
+                if (mat == null) continue;
+
+                // Try URP/HDRP property first, then Standard
+                if (mat.HasProperty(BaseColorID))
+                    mat.SetColor(BaseColorID, color);
+                else if (mat.HasProperty(ColorID))
+                    mat.SetColor(ColorID, color);
+
+                if (metallic >= 0 && mat.HasProperty(MetallicID))
+                    mat.SetFloat(MetallicID, metallic);
+
+                if (smoothness >= 0)
+                {
+                    if (mat.HasProperty(SmoothnessID))
+                        mat.SetFloat(SmoothnessID, smoothness);
+                    else if (mat.HasProperty(GlossinessID))
+                        mat.SetFloat(GlossinessID, smoothness);
+                }
             }
+
+            // Important: assign the materials array back to the renderer to apply changes
+            rend.materials = mats;
         }
     }
 
@@ -253,9 +267,17 @@ public class CarCustomizer : MonoBehaviour
         foreach (Renderer rend in renderers)
         {
             if (rend == null) continue;
-            Material mat = rend.material;
-            mat.EnableKeyword("_EMISSION");
-            mat.SetColor(EmissionColorID, emissionColor * intensity);
+
+            Material[] mats = rend.materials;
+            for (int i = 0; i < mats.Length; i++)
+            {
+                Material mat = mats[i];
+                if (mat == null) continue;
+
+                mat.EnableKeyword("_EMISSION");
+                mat.SetColor(EmissionColorID, emissionColor * intensity);
+            }
+            rend.materials = mats;
         }
     }
 

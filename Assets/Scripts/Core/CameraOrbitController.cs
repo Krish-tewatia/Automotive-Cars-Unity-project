@@ -146,4 +146,9 @@ public class CameraOrbitController : MonoBehaviour
     public void SetSideView() => SetViewAngle(90, 15, 5);
     public void SetRearView() => SetViewAngle(180, 20, 6);
     public void SetTopView() => SetViewAngle(0, 55, 8);
+
+    /// <summary>
+    /// Reset the camera to a pleasant default view of the current target
+    /// </summary>
+    public void ResetView() => SetViewAngle(currentHorizontalAngle, 25, 6);
 }

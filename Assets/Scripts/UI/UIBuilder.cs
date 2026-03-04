@@ -91,6 +91,7 @@ public class UIBuilder : MonoBehaviour
 
         BuildMainPanel();
         BuildAISuggestionsPanel();
+        BuildCarSelectorPanel(); // New Selection UI
         BuildStatusBar();
         BuildViewControls();
         WireUIController();
@@ -698,5 +699,36 @@ public class UIBuilder : MonoBehaviour
         if (smoothness < 0.4f) return "MATTE";
         if (smoothness < 0.6f) return "SATIN";
         return "GLOSS";
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  CAR SELECTOR PANEL (Bottom Center)
+    // ═══════════════════════════════════════════════════════
+
+    private void BuildCarSelectorPanel()
+    {
+        // Bottom-center floating pill panel
+        GameObject selectorPanel = CreatePanel("CarSelectorPanel", new Vector2(420, 80),
+                                              new Vector2(0.5f, 0), new Vector2(0.5f, 0),
+                                              new Vector2(0, 15));
+
+        // Title
+        CreateText(selectorPanel.transform, "SelectorLabel", "SELECT CAR",
+                  new Vector2(0, 28), new Vector2(200, 20), 11, FontStyle.Bold,
+                  new Color(0.6f, 0.7f, 1f, 0.8f));
+
+        // Classic Sedan button (left)
+        Button classicBtn = CreateButton(selectorPanel.transform, "SelectClassic",
+                                        "\u2B50 CLASSIC SEDAN",
+                                        new Vector2(-105, -5), new Vector2(185, 42),
+                                        new Color(0.25f, 0.2f, 0.15f));
+        classicBtn.onClick.AddListener(() => GameManager.Instance?.SelectCar(0));
+
+        // Sport GT button (right)
+        Button sportBtn = CreateButton(selectorPanel.transform, "SelectSport",
+                                      "\uD83C\uDFCE SPORT GT",
+                                      new Vector2(105, -5), new Vector2(185, 42),
+                                      new Color(0.15f, 0.2f, 0.3f));
+        sportBtn.onClick.AddListener(() => GameManager.Instance?.SelectCar(1));
     }
 }

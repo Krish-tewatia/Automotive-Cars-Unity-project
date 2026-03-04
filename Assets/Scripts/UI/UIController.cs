@@ -81,6 +81,16 @@ public class UIController : MonoBehaviour
         if (GameManager.Instance != null)
         {
             GameManager.Instance.OnStatusMessage.AddListener(UpdateStatusText);
+            GameManager.Instance.OnCarSelected.AddListener(OnCarSwitched);
+        }
+    }
+
+    private void OnCarSwitched(int index)
+    {
+        // Update local references to the new active car
+        if (GameManager.Instance != null && GameManager.Instance.activeCar != null)
+        {
+            carCustomizer = GameManager.Instance.activeCar;
         }
     }
 

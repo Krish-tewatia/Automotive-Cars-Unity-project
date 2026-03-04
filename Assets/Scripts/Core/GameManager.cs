@@ -10,7 +10,10 @@ public class GameManager : MonoBehaviour
     public static GameManager Instance { get; private set; }
 
     [Header("References")]
-    public CarCustomizer carCustomizer;
+    public System.Collections.Generic.List<CarCustomizer> availableCars = new System.Collections.Generic.List<CarCustomizer>();
+    public int activeCarIndex = 0;
+    public CarCustomizer activeCar => (availableCars.Count > 0 && activeCarIndex < availableCars.Count) ? availableCars[activeCarIndex] : null;
+
     public CameraOrbitController cameraController;
     public UIController uiController;
     public AIStyleEngine aiEngine;
@@ -18,11 +21,12 @@ public class GameManager : MonoBehaviour
 
     [Header("Settings")]
     public bool enableAI = true;
-    public string apiKey = ""; // Leave empty to use built-in presets
+    public string apiKey = ""; 
 
     [Header("Events")]
     public UnityEvent OnApplicationReady;
     public UnityEvent<string> OnStatusMessage;
+    public UnityEvent<int> OnCarSelected;
 
     private bool isInitialized = false;
 
@@ -88,10 +92,10 @@ public class GameManager : MonoBehaviour
             aiEngine.Initialize(apiKey);
         }
 
-        // Initialize Car Customizer
-        if (carCustomizer != null)
+        // Initialize Car Customizers
+        foreach (var car in availableCars)
         {
-            carCustomizer.Initialize();
+            if (car != null) car.Initialize();
         }
 
         // Initialize Environment
@@ -106,9 +110,29 @@ public class GameManager : MonoBehaviour
         Debug.Log("[GameManager] Application Ready!");
     }
 
-    /// <summary>
-    /// Request AI suggestions based on a theme keyword
-    /// </summary>
+    public void SelectCar(int index)
+    {
+        if (index < 0 || index >= availableCars.Count) return;
+
+        activeCarIndex = index;
+        
+        // Focus camera on active car
+        if (cameraController != null && activeCar != null)
+        {
+            cameraController.target = activeCar.transform;
+            // Reset rotation slightly to show the car well
+            cameraController.ResetView();
+        }
+
+        if (uiController != null)
+        {
+            uiController.carCustomizer = activeCar;
+            uiController.UpdateStatusText($"Selected {activeCar.gameObject.name} for customization.");
+        }
+
+        OnCarSelected?.Invoke(index);
+    }
+
     public void RequestAISuggestions(string theme)
     {
         if (!enableAI || aiEngine == null) return;
@@ -124,26 +148,19 @@ public class GameManager : MonoBehaviour
         });
     }
 
-    /// <summary>
-    /// Apply a specific AI suggestion configuration to the car
-    /// </summary>
     public void ApplyConfiguration(CarConfiguration config)
     {
-        if (carCustomizer == null) return;
-
-        carCustomizer.ApplyConfiguration(config);
-        OnStatusMessage?.Invoke($"Applied '{config.configName}' configuration!");
+        if (activeCar == null) return;
+        activeCar.ApplyConfiguration(config);
+        OnStatusMessage?.Invoke($"Applied '{config.configName}' configuration to {activeCar.gameObject.name}!");
     }
 
-    /// <summary>
-    /// Reset car to default configuration
-    /// </summary>
     public void ResetToDefault()
     {
-        if (carCustomizer != null)
+        if (activeCar != null)
         {
-            carCustomizer.ResetToDefault();
-            OnStatusMessage?.Invoke("Car reset to default configuration.");
+            activeCar.ResetToDefault();
+            OnStatusMessage?.Invoke($"{activeCar.gameObject.name} reset to default configuration.");
         }
     }
 }

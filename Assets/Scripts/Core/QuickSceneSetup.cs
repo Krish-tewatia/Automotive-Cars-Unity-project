@@ -264,7 +264,8 @@ public class QuickSceneSetup : MonoBehaviour
 
         GameObject gmObj = new GameObject("GameManager");
         GameManager gm = gmObj.AddComponent<GameManager>();
-        gm.carCustomizer = customizer;
+        if (customizer != null)
+            gm.availableCars.Add(customizer);
         gm.cameraController = camera;
         gm.uiController = ui;
         gm.aiEngine = ai;

@@ -132,29 +132,61 @@ public class CarCustomizer : MonoBehaviour
         styleIndex = Mathf.Clamp(styleIndex, 0, wheelPrefabs.Length - 1);
         currentConfig.wheelStyleIndex = styleIndex;
 
-        // Swap wheel meshes
+        // Swap wheel meshes at each mount point
         for (int i = 0; i < wheelMountPoints.Length; i++)
         {
             if (wheelMountPoints[i] == null) continue;
 
-            // Remove current wheel
+            // Remove current wheel model at this mount point
             foreach (Transform child in wheelMountPoints[i])
             {
                 Destroy(child.gameObject);
             }
 
-            // Instantiate new wheel
+            // Instantiate the new wheel prefab
             if (wheelPrefabs[styleIndex] != null)
             {
                 GameObject newWheel = Instantiate(wheelPrefabs[styleIndex], wheelMountPoints[i]);
                 newWheel.transform.localPosition = Vector3.zero;
                 newWheel.transform.localRotation = Quaternion.identity;
+
+                // Scale wheel to reasonable size (0.4 works well for both car types)
+                float wheelScale = 0.4f;
+                newWheel.transform.localScale = Vector3.one * wheelScale;
+
+                // Mirror left-side wheels (mount points with negative X position relative to car root)
+                Transform carRoot = wheelMountPoints[i].root;
+                Vector3 worldPos = wheelMountPoints[i].position;
+                Vector3 localToCar = carRoot.InverseTransformPoint(worldPos);
+                if (localToCar.x < -0.1f)
+                {
+                    // Flip on X axis for left side
+                    Vector3 scale = newWheel.transform.localScale;
+                    scale.x = -scale.x;
+                    newWheel.transform.localScale = scale;
+                }
+
+                // Force-instance materials on the new wheel so colors can be changed
+                Renderer[] newRenderers = newWheel.GetComponentsInChildren<Renderer>(true);
+                foreach (Renderer rend in newRenderers)
+                {
+                    if (rend != null)
+                    {
+                        Material[] mats = rend.materials;
+                        rend.materials = mats;
+                    }
+                }
             }
         }
 
         OnWheelStyleChanged?.Invoke(styleIndex);
-        Debug.Log($"[CarCustomizer] Wheel style changed to index: {styleIndex}");
+        Debug.Log($"[CarCustomizer] Wheel style changed to: {(wheelPrefabs[styleIndex] != null ? wheelPrefabs[styleIndex].name : "null")} (index {styleIndex})");
     }
+
+    /// <summary>
+    /// Get the number of available wheel styles
+    /// </summary>
+    public int GetWheelCount() => (wheelPrefabs != null) ? wheelPrefabs.Length : 0;
 
     /// <summary>
     /// Set wheel color

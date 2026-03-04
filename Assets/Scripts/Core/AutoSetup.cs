@@ -119,6 +119,29 @@ public class AutoSetup : MonoBehaviour
                 GameManager.Instance.availableCars.Add(sportCust);
         }
 
+        // ─── Load Wheel Prefabs from Low Poly 3D Wheel Pack ───
+        GameObject[] wheelPrefabs = LoadWheelPrefabs();
+        if (wheelPrefabs != null && wheelPrefabs.Length > 0)
+        {
+            Debug.Log($"[AutoSetup] Loaded {wheelPrefabs.Length} wheel prefabs from wheel pack!");
+
+            // Setup wheel mount points for primitive car
+            if (primCust != null)
+            {
+                SetupWheelMountPoints(primitiveCar, primCust, wheelPrefabs);
+            }
+
+            // Setup wheel mount points for sport car
+            if (sportCar != null)
+            {
+                CarCustomizer sportCust2 = sportCar.GetComponent<CarCustomizer>();
+                if (sportCust2 != null)
+                {
+                    SetupWheelMountPoints(sportCar, sportCust2, wheelPrefabs);
+                }
+            }
+        }
+
         Debug.Log($"[AutoSetup] Cars created! Registered {(GameManager.Instance != null ? GameManager.Instance.availableCars.Count : 0)} cars with GameManager.");
     }
 
@@ -405,6 +428,188 @@ public class AutoSetup : MonoBehaviour
                   $"Body: {bodyList.Count}, Windows: {windowList.Count}, " +
                   $"Tires: {tireList.Count}, Wheels: {wheelList.Count}, Lights: {headlightList.Count}, " +
                   $"Interior: {interiorList.Count}");
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  WHEEL PREFAB LOADING (Low Poly 3D Wheel Pack)
+    // ═══════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Load all wheel prefabs from the Low Poly 3D Wheel Model Pack.
+    /// Searches Assets/wheel/Prefabs/ for wheel_01 through wheel_12.
+    /// </summary>
+    private GameObject[] LoadWheelPrefabs()
+    {
+        var wheelPrefabs = new System.Collections.Generic.List<GameObject>();
+
+#if UNITY_EDITOR
+        // Try multiple possible locations for the wheel pack
+        string[] possibleFolders = {
+            "Assets/wheel/Prefabs",
+            "Assets/wheel",
+            "Assets/Wheel/Prefabs",
+            "Assets/Wheel"
+        };
+
+        string[] guids = new string[0];
+
+        // Search each possible folder
+        foreach (string folder in possibleFolders)
+        {
+            if (UnityEditor.AssetDatabase.IsValidFolder(folder))
+            {
+                guids = UnityEditor.AssetDatabase.FindAssets("t:Prefab", new[] { folder });
+                if (guids.Length > 0)
+                {
+                    Debug.Log($"[AutoSetup] Found {guids.Length} prefabs in {folder}");
+                    break;
+                }
+            }
+        }
+
+        // Fallback: broad search across all Assets
+        if (guids.Length == 0)
+        {
+            guids = UnityEditor.AssetDatabase.FindAssets("wheel_ t:Prefab", new[] { "Assets" });
+        }
+
+        // Filter and sort by filename
+        var paths = new System.Collections.Generic.List<string>();
+        foreach (string guid in guids)
+        {
+            string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
+            string fileName = System.IO.Path.GetFileNameWithoutExtension(path).ToLower();
+            // Only include wheel_XX prefabs (from Low Poly pack), skip Sport_Wheel etc.
+            if (fileName.StartsWith("wheel_") && !fileName.Contains("sport"))
+            {
+                paths.Add(path);
+            }
+        }
+        paths.Sort();
+
+        foreach (string path in paths)
+        {
+            GameObject prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(path);
+            if (prefab != null)
+            {
+                wheelPrefabs.Add(prefab);
+                Debug.Log($"[AutoSetup] Loaded wheel prefab: {System.IO.Path.GetFileName(path)}");
+            }
+        }
+#endif
+
+        // Fallback: Try Resources.Load
+        if (wheelPrefabs.Count == 0)
+        {
+            for (int i = 1; i <= 12; i++)
+            {
+                string name = $"wheel_{i:D2}";
+                GameObject prefab = Resources.Load<GameObject>(name);
+                if (prefab != null)
+                    wheelPrefabs.Add(prefab);
+            }
+        }
+
+        if (wheelPrefabs.Count == 0)
+        {
+            Debug.LogWarning("[AutoSetup] No wheel prefabs found from Low Poly 3D Wheel Pack. " +
+                           "Make sure the package is imported to Assets/wheel/");
+        }
+
+        return wheelPrefabs.ToArray();
+    }
+
+    /// <summary>
+    /// Setup wheel mount points on a car and assign wheel prefabs for swapping.
+    /// For primitive car: wraps existing wheel groups in mount points.
+    /// For imported car: finds wheel-related transforms and creates mount points.
+    /// </summary>
+    private void SetupWheelMountPoints(GameObject car, CarCustomizer customizer, GameObject[] wheelPrefabs)
+    {
+        customizer.wheelPrefabs = wheelPrefabs;
+
+        var mountPoints = new System.Collections.Generic.List<Transform>();
+
+        // Strategy: Find existing wheel containers/groups
+        // For the primitive car, wheels are named "Wheel_0", "Wheel_1", etc.
+        // For the sport car, wheels may have different naming
+
+        // Try finding by common wheel names
+        string[] wheelSearchNames = { "Wheel_0", "Wheel_1", "Wheel_2", "Wheel_3",
+                                      "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr",
+                                      "WheelFL", "WheelFR", "WheelRL", "WheelRR" };
+
+        foreach (string wName in wheelSearchNames)
+        {
+            Transform found = car.transform.Find(wName);
+            if (found != null)
+            {
+                // Create a mount point as a child of the wheel group
+                GameObject mountPoint = new GameObject($"WheelMountPoint_{mountPoints.Count}");
+                mountPoint.transform.SetParent(found, false);
+                mountPoint.transform.localPosition = Vector3.zero;
+                mountPoint.transform.localRotation = Quaternion.identity;
+                mountPoints.Add(mountPoint.transform);
+            }
+        }
+
+        // If we didn't find named wheels, search by hierarchy for wheel-like objects
+        if (mountPoints.Count == 0)
+        {
+            // Search all children for wheel-related transforms
+            foreach (Transform child in car.GetComponentsInChildren<Transform>(true))
+            {
+                string childName = child.name.ToLower();
+                if ((childName.Contains("wheel") || childName.Contains("rim") || childName.Contains("ring"))
+                    && !childName.Contains("mount") && child != car.transform)
+                {
+                    // Check if this is a top-level wheel container (not a sub-mesh)
+                    bool isTopLevel = true;
+                    Transform parent = child.parent;
+                    while (parent != null && parent != car.transform)
+                    {
+                        string pName = parent.name.ToLower();
+                        if (pName.Contains("wheel") || pName.Contains("rim"))
+                        {
+                            isTopLevel = false;
+                            break;
+                        }
+                        parent = parent.parent;
+                    }
+
+                    if (isTopLevel && !mountPoints.Exists(mp => mp.parent == child))
+                    {
+                        GameObject mountPoint = new GameObject($"WheelMountPoint_{mountPoints.Count}");
+                        mountPoint.transform.SetParent(child, false);
+                        mountPoint.transform.localPosition = Vector3.zero;
+                        mountPoint.transform.localRotation = Quaternion.identity;
+                        mountPoints.Add(mountPoint.transform);
+                    }
+                }
+            }
+        }
+
+        // If still no mount points, create them at standard wheel positions
+        if (mountPoints.Count == 0)
+        {
+            Vector3[] defaultPositions = {
+                new Vector3(-1.05f, 0.15f, 1.5f),
+                new Vector3( 1.05f, 0.15f, 1.5f),
+                new Vector3(-1.05f, 0.15f, -1.5f),
+                new Vector3( 1.05f, 0.15f, -1.5f)
+            };
+
+            for (int i = 0; i < defaultPositions.Length; i++)
+            {
+                GameObject mountPoint = new GameObject($"WheelMountPoint_{i}");
+                mountPoint.transform.SetParent(car.transform, false);
+                mountPoint.transform.localPosition = defaultPositions[i];
+                mountPoints.Add(mountPoint.transform);
+            }
+        }
+
+        customizer.wheelMountPoints = mountPoints.ToArray();
+        Debug.Log($"[AutoSetup] Wheel mount points set up: {mountPoints.Count} points on {car.name}, {wheelPrefabs.Length} prefabs available.");
     }
 
     // ═══════════════════════════════════════════════════════

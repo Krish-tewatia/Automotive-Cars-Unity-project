@@ -91,7 +91,8 @@ public class UIBuilder : MonoBehaviour
 
         BuildMainPanel();
         BuildAISuggestionsPanel();
-        BuildCarSelectorPanel(); // New Selection UI
+        BuildCarSelectorPanel();
+        BuildWheelSelectorPanel(); // Moved here
         BuildStatusBar();
         BuildViewControls();
         WireUIController();
@@ -182,28 +183,107 @@ public class UIBuilder : MonoBehaviour
                              (v) => carCustomizer?.SetSmoothness(v));
         yOffset -= 45;
 
-        CreateDivider(mainPanel.transform, yOffset);
-        yOffset -= 15;
-
-        CreateText(mainPanel.transform, "WheelLabel", "WHEEL STYLE",
-                  new Vector2(0, yOffset), new Vector2(300, 25), 14, FontStyle.Bold, accentColor);
-        yOffset -= 35;
-
-        for (int i = 0; i < wheelNames.Length; i++)
-        {
-            int idx = i;
-            float x = -120 + i * 58;
-            Button wheelBtn = CreateButton(mainPanel.transform, $"Wheel_{wheelNames[i]}",
-                                          wheelNames[i][0].ToString(),
-                                          new Vector2(x, yOffset), new Vector2(50, 40), buttonColor);
-            wheelBtn.onClick.AddListener(() => carCustomizer?.SetWheelStyle(idx));
-        }
-        yOffset -= 55;
-
         Button resetBtn = CreateButton(mainPanel.transform, "ResetButton", "RESET",
                                       new Vector2(0, yOffset), new Vector2(280, 40),
                                       new Color(0.6f, 0.15f, 0.15f));
         resetBtn.onClick.AddListener(() => GameManager.Instance?.ResetToDefault());
+    }
+
+    #endregion
+
+    #region Wheel Selector Panel (Bottom Center, above Car Selector)
+
+    private Text wheelIndexLabel; 
+    private int currentWheelPage = 0;
+    private const int WHEELS_PER_PAGE = 4;
+
+    private void BuildWheelSelectorPanel()
+    {
+        // Panel sits ABOVE the car selector panel
+        GameObject wheelPanel = CreatePanel("WheelSelectorPanel", new Vector2(400, 100),
+                                           new Vector2(0.5f, 0), new Vector2(0.5f, 0),
+                                           new Vector2(0, 110)); // Adjusted position
+
+        // Title at the top of the panel
+        CreateText(wheelPanel.transform, "WheelLabel", "WHEEL STYLE",
+                  new Vector2(0, 75), new Vector2(300, 20), 12, FontStyle.Bold, accentColor);
+        
+        // Navigation Row in the middle
+        float navY = 45f;
+        Button prevBtn = CreateButton(wheelPanel.transform, "WheelPrev", "◀",
+                                     new Vector2(-120, navY), new Vector2(40, 32),
+                                     new Color(0.18f, 0.22f, 0.35f));
+
+        int totalWheels = (carCustomizer != null) ? carCustomizer.GetWheelCount() : 12;
+        wheelIndexLabel = CreateText(wheelPanel.transform, "WheelIndexLabel",
+                                    totalWheels > 0 ? "WHEEL 1 / " + totalWheels : "NO WHEELS",
+                                    new Vector2(0, navY), new Vector2(160, 30), 13, FontStyle.Bold,
+                                    new Color(0.85f, 0.9f, 1f));
+
+        Button nextBtn = CreateButton(wheelPanel.transform, "WheelNext", "▶",
+                                     new Vector2(120, navY), new Vector2(40, 32),
+                                     new Color(0.18f, 0.22f, 0.35f));
+
+        // Wire buttons
+        prevBtn.onClick.AddListener(() => ChangeWheelStyle(-1));
+        nextBtn.onClick.AddListener(() => ChangeWheelStyle(1));
+
+        // Quick Select Row at the bottom
+        float gridY = 15f;
+        for (int i = 0; i < 4; i++)
+        {
+            int idx = i;
+            float x = -60 + i * 40;
+            Button quickBtn = CreateButton(wheelPanel.transform, $"WheelQuick_{i}",
+                                          $"{i + 1}",
+                                          new Vector2(x, gridY), new Vector2(30, 26),
+                                          new Color(0.2f, 0.25f, 0.35f));
+            quickBtn.onClick.AddListener(() => {
+                CarCustomizer active = GetActiveCustomizer();
+                if (active != null) {
+                    active.SetWheelStyle(idx);
+                    UpdateWheelLabel(idx, active.GetWheelCount());
+                }
+            });
+        }
+
+        // Update label when car is switched
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnCarSelected.AddListener((idx) => {
+                CarCustomizer active = GetActiveCustomizer();
+                if (active != null) UpdateWheelLabel(active.GetCurrentWheelStyle(), active.GetWheelCount());
+            });
+        }
+    }
+
+    private void ChangeWheelStyle(int delta)
+    {
+        CarCustomizer active = GetActiveCustomizer();
+        if (active == null) return;
+        
+        int total = active.GetWheelCount();
+        if (total == 0) return;
+        
+        int current = active.GetCurrentWheelStyle();
+        int newIdx = (current + delta + total) % total;
+        active.SetWheelStyle(newIdx);
+        UpdateWheelLabel(newIdx, total);
+    }
+
+    private void UpdateWheelLabel(int index, int total)
+    {
+        if (wheelIndexLabel != null)
+        {
+            wheelIndexLabel.text = $"WHEEL {index + 1} / {total}";
+        }
+    }
+
+    private CarCustomizer GetActiveCustomizer()
+    {
+        if (GameManager.Instance != null && GameManager.Instance.activeCar != null)
+            return GameManager.Instance.activeCar;
+        return carCustomizer;
     }
 
     #endregion
@@ -712,22 +792,25 @@ public class UIBuilder : MonoBehaviour
                                               new Vector2(0.5f, 0), new Vector2(0.5f, 0),
                                               new Vector2(0, 15));
 
-        // Title
+        // Title at y=60 (80 height total)
         CreateText(selectorPanel.transform, "SelectorLabel", "SELECT CAR",
-                  new Vector2(0, 28), new Vector2(200, 20), 11, FontStyle.Bold,
+                  new Vector2(0, 60), new Vector2(200, 20), 11, FontStyle.Bold,
                   new Color(0.6f, 0.7f, 1f, 0.8f));
+
+        // Buttons at y=25
+        float btnY = 25f;
 
         // Classic Sedan button (left)
         Button classicBtn = CreateButton(selectorPanel.transform, "SelectClassic",
                                         "\u2B50 CLASSIC SEDAN",
-                                        new Vector2(-105, -5), new Vector2(185, 42),
+                                        new Vector2(-105, btnY), new Vector2(185, 42),
                                         new Color(0.25f, 0.2f, 0.15f));
         classicBtn.onClick.AddListener(() => GameManager.Instance?.SelectCar(0));
 
         // Sport GT button (right)
         Button sportBtn = CreateButton(selectorPanel.transform, "SelectSport",
                                       "\uD83C\uDFCE SPORT GT",
-                                      new Vector2(105, -5), new Vector2(185, 42),
+                                      new Vector2(105, btnY), new Vector2(185, 42),
                                       new Color(0.15f, 0.2f, 0.3f));
         sportBtn.onClick.AddListener(() => GameManager.Instance?.SelectCar(1));
     }

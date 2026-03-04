@@ -78,10 +78,18 @@ public class UIController : MonoBehaviour
         SetupThemeButtons();
         SetupViewButtons();
 
+        // Delay event registration to ensure GameManager is fully initialized
+        Invoke(nameof(RegisterWithGameManager), 0.2f);
+    }
+
+    private void RegisterWithGameManager()
+    {
         if (GameManager.Instance != null)
         {
-            GameManager.Instance.OnStatusMessage.AddListener(UpdateStatusText);
-            GameManager.Instance.OnCarSelected.AddListener(OnCarSwitched);
+            if (GameManager.Instance.OnStatusMessage != null)
+                GameManager.Instance.OnStatusMessage.AddListener(UpdateStatusText);
+            if (GameManager.Instance.OnCarSelected != null)
+                GameManager.Instance.OnCarSelected.AddListener(OnCarSwitched);
         }
     }
 

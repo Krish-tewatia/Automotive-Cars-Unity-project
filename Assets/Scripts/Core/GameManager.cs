@@ -24,9 +24,9 @@ public class GameManager : MonoBehaviour
     public string apiKey = ""; 
 
     [Header("Events")]
-    public UnityEvent OnApplicationReady;
-    public UnityEvent<string> OnStatusMessage;
-    public UnityEvent<int> OnCarSelected;
+    public UnityEvent OnApplicationReady = new UnityEvent();
+    public UnityEvent<string> OnStatusMessage = new UnityEvent<string>();
+    public UnityEvent<int> OnCarSelected = new UnityEvent<int>();
 
     private bool isInitialized = false;
 

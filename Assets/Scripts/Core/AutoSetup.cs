@@ -125,9 +125,11 @@ public class AutoSetup : MonoBehaviour
         {
             Debug.Log($"[AutoSetup] Loaded {wheelPrefabs.Length} wheel prefabs from wheel pack!");
 
-            // Setup wheel mount points for primitive car
+            // Primitive car should still swap wheel prefabs,
+            // but without adaptive wheel width fitting.
             if (primCust != null)
             {
+                primCust.useAdaptiveWheelFit = false;
                 SetupWheelMountPoints(primitiveCar, primCust, wheelPrefabs);
             }
 
@@ -299,6 +301,7 @@ public class AutoSetup : MonoBehaviour
 
         // === SETUP CUSTOMIZER ===
         CarCustomizer customizer = car.AddComponent<CarCustomizer>();
+        customizer.useAdaptiveWheelFit = false;
         customizer.bodyRenderers = new Renderer[] {
             bodyLower.GetComponent<Renderer>(), bodyUpper.GetComponent<Renderer>(),
             hood.GetComponent<Renderer>(), trunk.GetComponent<Renderer>(),
@@ -537,7 +540,9 @@ public class AutoSetup : MonoBehaviour
         // Try finding by common wheel names
         string[] wheelSearchNames = { "Wheel_0", "Wheel_1", "Wheel_2", "Wheel_3",
                                       "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr",
-                                      "WheelFL", "WheelFR", "WheelRL", "WheelRR" };
+                                      "WheelFL", "WheelFR", "WheelRL", "WheelRR",
+                                      "FL", "FR", "RL", "RR",
+                                      "fl", "fr", "rl", "rr" };
 
         foreach (string wName in wheelSearchNames)
         {
@@ -579,11 +584,15 @@ public class AutoSetup : MonoBehaviour
 
                     if (isTopLevel && !mountPoints.Exists(mp => mp.parent == child))
                     {
+                        // Create mount point at the child's position but parented to car root
                         GameObject mountPoint = new GameObject($"WheelMountPoint_{mountPoints.Count}");
-                        mountPoint.transform.SetParent(child, false);
-                        mountPoint.transform.localPosition = Vector3.zero;
+                        mountPoint.transform.SetParent(car.transform, false);
+                        mountPoint.transform.position = child.position;
                         mountPoint.transform.localRotation = Quaternion.identity;
                         mountPoints.Add(mountPoint.transform);
+                        
+                        // Hide original wheel mesh
+                        child.gameObject.SetActive(false);
                     }
                 }
             }

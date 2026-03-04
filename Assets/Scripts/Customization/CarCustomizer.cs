@@ -19,6 +19,13 @@ public class CarCustomizer : MonoBehaviour
     [Header("Wheel Prefabs")]
     public GameObject[] wheelPrefabs;       // Different wheel styles
     public Transform[] wheelMountPoints;    // Where wheels attach
+    public bool enableWheelSwapping = true;
+
+    [Header("Wheel Fit")]
+    public bool useAdaptiveWheelFit = true;
+    [Range(0.6f, 1.2f)] public float wheelDiameterFit = 0.98f;
+    [Range(0.4f, 1.2f)] public float wheelWidthFit = 0.88f;
+    public float fallbackWheelScale = 0.4f;
 
     [Header("Current Configuration")]
     public CarConfiguration currentConfig;
@@ -123,9 +130,18 @@ public class CarCustomizer : MonoBehaviour
     /// </summary>
     public void SetWheelStyle(int styleIndex)
     {
+        if (!enableWheelSwapping)
+            return;
+
         if (wheelPrefabs == null || wheelPrefabs.Length == 0)
         {
             Debug.LogWarning("[CarCustomizer] No wheel prefabs assigned!");
+            return;
+        }
+
+        if (wheelMountPoints == null || wheelMountPoints.Length == 0)
+        {
+            Debug.LogWarning("[CarCustomizer] No wheel mount points assigned!");
             return;
         }
 
@@ -148,26 +164,33 @@ public class CarCustomizer : MonoBehaviour
             {
                 GameObject newWheel = Instantiate(wheelPrefabs[styleIndex], wheelMountPoints[i]);
                 newWheel.transform.localPosition = Vector3.zero;
-                newWheel.transform.localRotation = Quaternion.identity;
 
-                // Scale wheel to reasonable size (0.4 works well for both car types)
-                float wheelScale = 0.4f;
-                newWheel.transform.localScale = Vector3.one * wheelScale;
+                // Align wheel so the visible face points outward from the car body.
+                // These wheel prefabs use local Z as the wheel normal (axle direction).
+                Transform carRoot = transform;
+                Vector3 localPos = carRoot.InverseTransformPoint(wheelMountPoints[i].position);
+                
+                Vector3 wheelAxle = (localPos.x > 0.1f) ? Vector3.right : Vector3.left;
+                
+                // Map local Z -> wheel side direction, keep local Y vertical.
+                // Apply in world space so parent wheel transform rotations don't skew alignment.
+                Quaternion desiredCarLocalRotation = Quaternion.LookRotation(wheelAxle, Vector3.up);
+                newWheel.transform.rotation = carRoot.rotation * desiredCarLocalRotation;
 
-                // Mirror left-side wheels (mount points with negative X position relative to car root)
-                Transform carRoot = wheelMountPoints[i].root;
-                Vector3 worldPos = wheelMountPoints[i].position;
-                Vector3 localToCar = carRoot.InverseTransformPoint(worldPos);
-                if (localToCar.x < -0.1f)
+                Renderer[] newRenderers = newWheel.GetComponentsInChildren<Renderer>(true);
+
+                if (useAdaptiveWheelFit)
                 {
-                    // Flip on X axis for left side
-                    Vector3 scale = newWheel.transform.localScale;
-                    scale.x = -scale.x;
-                    newWheel.transform.localScale = scale;
+                    Vector3 sourceSize = GetRenderersSizeInLocalSpace(newRenderers, carRoot);
+                    Vector3 referenceSize = GetReferenceWheelSize(wheelMountPoints[i], carRoot);
+                    newWheel.transform.localScale = CalculateFittedWheelScale(sourceSize, referenceSize);
+                }
+                else
+                {
+                    newWheel.transform.localScale = Vector3.one * fallbackWheelScale;
                 }
 
                 // Force-instance materials on the new wheel so colors can be changed
-                Renderer[] newRenderers = newWheel.GetComponentsInChildren<Renderer>(true);
                 foreach (Renderer rend in newRenderers)
                 {
                     if (rend != null)
@@ -311,6 +334,107 @@ public class CarCustomizer : MonoBehaviour
             }
             rend.materials = mats;
         }
+    }
+
+    private Vector3 GetReferenceWheelSize(Transform mountPoint, Transform carRoot)
+    {
+        Renderer nearestTire = GetNearestRenderer(tireRenderers, mountPoint.position, 3f);
+        if (nearestTire != null)
+            return GetRendererSizeInLocalSpace(nearestTire, carRoot);
+
+        Renderer nearestWheel = GetNearestRenderer(wheelRenderers, mountPoint.position, 3f);
+        if (nearestWheel != null)
+            return GetRendererSizeInLocalSpace(nearestWheel, carRoot);
+
+        return Vector3.zero;
+    }
+
+    private Renderer GetNearestRenderer(Renderer[] renderers, Vector3 worldPos, float maxDistance)
+    {
+        if (renderers == null || renderers.Length == 0) return null;
+
+        float maxDistanceSqr = maxDistance * maxDistance;
+        float bestDistanceSqr = float.MaxValue;
+        Renderer best = null;
+
+        foreach (Renderer rend in renderers)
+        {
+            if (rend == null) continue;
+            if (rend.bounds.size.sqrMagnitude < 1e-6f) continue;
+
+            float distSqr = (rend.bounds.center - worldPos).sqrMagnitude;
+            if (distSqr < bestDistanceSqr && distSqr <= maxDistanceSqr)
+            {
+                bestDistanceSqr = distSqr;
+                best = rend;
+            }
+        }
+
+        return best;
+    }
+
+    private Vector3 CalculateFittedWheelScale(Vector3 sourceSize, Vector3 referenceSize)
+    {
+        float sourceWidth = Mathf.Max(sourceSize.x, 1e-4f);
+        float sourceDiameter = Mathf.Max(Mathf.Max(sourceSize.y, sourceSize.z), 1e-4f);
+
+        if (referenceSize.sqrMagnitude < 1e-6f)
+        {
+            return Vector3.one * fallbackWheelScale;
+        }
+
+        float targetWidth = Mathf.Max(referenceSize.x * wheelWidthFit, 1e-4f);
+        float targetDiameter = Mathf.Max(Mathf.Max(referenceSize.y, referenceSize.z) * wheelDiameterFit, 1e-4f);
+
+        float widthScale = Mathf.Clamp(targetWidth / sourceWidth, 0.05f, 4f);
+        float diameterScale = Mathf.Clamp(targetDiameter / sourceDiameter, 0.05f, 4f);
+
+        // After rotation:
+        // local Z = wheel width axis, local X/Y = diameter axes.
+        return new Vector3(diameterScale, diameterScale, widthScale);
+    }
+
+    private Vector3 GetRendererSizeInLocalSpace(Renderer renderer, Transform reference)
+    {
+        if (renderer == null || reference == null) return Vector3.zero;
+        return GetRenderersSizeInLocalSpace(new[] { renderer }, reference);
+    }
+
+    private Vector3 GetRenderersSizeInLocalSpace(Renderer[] renderers, Transform reference)
+    {
+        if (renderers == null || renderers.Length == 0 || reference == null)
+            return Vector3.zero;
+
+        Vector3 min = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        Vector3 max = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+        bool foundBounds = false;
+
+        foreach (Renderer rend in renderers)
+        {
+            if (rend == null) continue;
+            Bounds b = rend.bounds;
+            if (b.size.sqrMagnitude < 1e-6f) continue;
+
+            Vector3 c = b.center;
+            Vector3 e = b.extents;
+
+            for (int xi = -1; xi <= 1; xi += 2)
+            {
+                for (int yi = -1; yi <= 1; yi += 2)
+                {
+                    for (int zi = -1; zi <= 1; zi += 2)
+                    {
+                        Vector3 corner = c + Vector3.Scale(e, new Vector3(xi, yi, zi));
+                        Vector3 localCorner = reference.InverseTransformPoint(corner);
+                        min = Vector3.Min(min, localCorner);
+                        max = Vector3.Max(max, localCorner);
+                        foundBounds = true;
+                    }
+                }
+            }
+        }
+
+        return foundBounds ? (max - min) : Vector3.zero;
     }
 
     private CarConfiguration LerpConfiguration(CarConfiguration a, CarConfiguration b, float t)

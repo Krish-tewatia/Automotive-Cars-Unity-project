@@ -27,6 +27,10 @@ public class UIBuilder : MonoBehaviour
     private GameObject aiSuggestionsPanel;
     private Transform suggestionCardsParent;
     private Text statusText;
+    private Transform carSelectorButtonsParent;
+    private readonly System.Collections.Generic.List<Button> carSelectorButtons = new System.Collections.Generic.List<Button>();
+    private readonly System.Collections.Generic.List<Image> carSelectorButtonImages = new System.Collections.Generic.List<Image>();
+    private readonly System.Collections.Generic.List<Color> carSelectorButtonBaseColors = new System.Collections.Generic.List<Color>();
 
     // Color palette
     private readonly Color[] colorPalette = new Color[]
@@ -787,31 +791,144 @@ public class UIBuilder : MonoBehaviour
 
     private void BuildCarSelectorPanel()
     {
-        // Bottom-center floating pill panel
-        GameObject selectorPanel = CreatePanel("CarSelectorPanel", new Vector2(420, 80),
+        // Wide floating panel with horizontal scroll for any number of cars
+        GameObject selectorPanel = CreatePanel("CarSelectorPanel", new Vector2(860, 92),
                                               new Vector2(0.5f, 0), new Vector2(0.5f, 0),
                                               new Vector2(0, 15));
 
-        // Title at y=60 (80 height total)
         CreateText(selectorPanel.transform, "SelectorLabel", "SELECT CAR",
-                  new Vector2(0, 60), new Vector2(200, 20), 11, FontStyle.Bold,
-                  new Color(0.6f, 0.7f, 1f, 0.8f));
+                  new Vector2(0, 70), new Vector2(260, 20), 11, FontStyle.Bold,
+                  new Color(0.6f, 0.7f, 1f, 0.85f));
 
-        // Buttons at y=25
-        float btnY = 25f;
+        GameObject scrollObj = new GameObject("CarSelectorScroll");
+        scrollObj.transform.SetParent(selectorPanel.transform, false);
+        RectTransform scrollRT = scrollObj.AddComponent<RectTransform>();
+        scrollRT.anchorMin = new Vector2(0, 0);
+        scrollRT.anchorMax = new Vector2(1, 0);
+        scrollRT.pivot = new Vector2(0.5f, 0);
+        scrollRT.anchoredPosition = new Vector2(0, 8);
+        scrollRT.sizeDelta = new Vector2(-20, 54);
 
-        // Classic Sedan button (left)
-        Button classicBtn = CreateButton(selectorPanel.transform, "SelectClassic",
-                                        "\u2B50 CLASSIC SEDAN",
-                                        new Vector2(-105, btnY), new Vector2(185, 42),
-                                        new Color(0.25f, 0.2f, 0.15f));
-        classicBtn.onClick.AddListener(() => GameManager.Instance?.SelectCar(0));
+        Image scrollBg = scrollObj.AddComponent<Image>();
+        scrollBg.color = new Color(0f, 0f, 0f, 0.12f);
+        Mask scrollMask = scrollObj.AddComponent<Mask>();
+        scrollMask.showMaskGraphic = false;
 
-        // Sport GT button (right)
-        Button sportBtn = CreateButton(selectorPanel.transform, "SelectSport",
-                                      "\uD83C\uDFCE SPORT GT",
-                                      new Vector2(105, btnY), new Vector2(185, 42),
-                                      new Color(0.15f, 0.2f, 0.3f));
-        sportBtn.onClick.AddListener(() => GameManager.Instance?.SelectCar(1));
+        GameObject content = new GameObject("CarSelectorContent");
+        content.transform.SetParent(scrollObj.transform, false);
+        RectTransform contentRT = content.AddComponent<RectTransform>();
+        contentRT.anchorMin = new Vector2(0, 0);
+        contentRT.anchorMax = new Vector2(0, 1);
+        contentRT.pivot = new Vector2(0, 0.5f);
+        contentRT.offsetMin = Vector2.zero;
+        contentRT.offsetMax = Vector2.zero;
+
+        HorizontalLayoutGroup hlg = content.AddComponent<HorizontalLayoutGroup>();
+        hlg.spacing = 10;
+        hlg.padding = new RectOffset(10, 10, 6, 6);
+        hlg.childAlignment = TextAnchor.MiddleLeft;
+        hlg.childForceExpandWidth = false;
+        hlg.childForceExpandHeight = false;
+        hlg.childControlWidth = false;
+        hlg.childControlHeight = false;
+
+        ContentSizeFitter csf = content.AddComponent<ContentSizeFitter>();
+        csf.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+        csf.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+        ScrollRect scroll = scrollObj.AddComponent<ScrollRect>();
+        scroll.content = contentRT;
+        scroll.viewport = scrollRT;
+        scroll.horizontal = true;
+        scroll.vertical = false;
+        scroll.movementType = ScrollRect.MovementType.Elastic;
+        scroll.inertia = true;
+        scroll.scrollSensitivity = 20f;
+
+        carSelectorButtonsParent = content.transform;
+        RefreshCarSelectorButtons();
+
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnCarSelected.AddListener(UpdateCarSelectorHighlight);
+        }
+
+        // Safety refresh for startup ordering
+        Invoke(nameof(RefreshCarSelectorButtons), 0.2f);
+    }
+
+    private void RefreshCarSelectorButtons()
+    {
+        if (carSelectorButtonsParent == null)
+            return;
+
+        foreach (Transform child in carSelectorButtonsParent)
+            Destroy(child.gameObject);
+
+        carSelectorButtons.Clear();
+        carSelectorButtonImages.Clear();
+        carSelectorButtonBaseColors.Clear();
+
+        int carCount = (GameManager.Instance != null) ? GameManager.Instance.availableCars.Count : 0;
+        if (carCount == 0)
+        {
+            Button placeholder = CreateButton(carSelectorButtonsParent, "NoCars", "NO CARS",
+                                             Vector2.zero, new Vector2(130, 40), new Color(0.22f, 0.22f, 0.24f));
+            placeholder.interactable = false;
+            return;
+        }
+
+        for (int i = 0; i < carCount; i++)
+        {
+            CarCustomizer car = GameManager.Instance.availableCars[i];
+            string displayName = FormatCarSelectorName(car != null ? car.gameObject.name : $"Car {i + 1}");
+            float hue = Mathf.Repeat(0.08f + i * 0.17f, 1f);
+            Color baseColor = Color.HSVToRGB(hue, 0.45f, 0.35f);
+            float buttonWidth = Mathf.Clamp(70f + displayName.Length * 6.5f, 130f, 220f);
+
+            Button button = CreateButton(carSelectorButtonsParent, $"SelectCar_{i}",
+                                        $"{i + 1}. {displayName}", Vector2.zero,
+                                        new Vector2(buttonWidth, 40f), baseColor);
+
+            int captureIndex = i;
+            button.onClick.AddListener(() => GameManager.Instance?.SelectCar(captureIndex));
+
+            carSelectorButtons.Add(button);
+            Image img = button.GetComponent<Image>();
+            carSelectorButtonImages.Add(img);
+            carSelectorButtonBaseColors.Add(baseColor);
+        }
+
+        int active = (GameManager.Instance != null) ? GameManager.Instance.activeCarIndex : 0;
+        UpdateCarSelectorHighlight(active);
+    }
+
+    private void UpdateCarSelectorHighlight(int activeIndex)
+    {
+        for (int i = 0; i < carSelectorButtons.Count; i++)
+        {
+            if (i >= carSelectorButtonImages.Count || carSelectorButtonImages[i] == null)
+                continue;
+
+            Color baseColor = (i < carSelectorButtonBaseColors.Count) ? carSelectorButtonBaseColors[i] : buttonColor;
+            carSelectorButtonImages[i].color = (i == activeIndex)
+                ? Color.Lerp(baseColor, accentColor, 0.55f)
+                : baseColor;
+        }
+    }
+
+    private string FormatCarSelectorName(string rawName)
+    {
+        if (string.IsNullOrWhiteSpace(rawName))
+            return "CAR";
+
+        string name = rawName.Replace("(Clone)", "").Replace("_", " ").Replace("-", " ").Trim();
+        while (name.Contains("  "))
+            name = name.Replace("  ", " ");
+
+        if (name.Equals("SportCar 1", System.StringComparison.OrdinalIgnoreCase))
+            name = "Sport GT";
+
+        return name.ToUpperInvariant();
     }
 }

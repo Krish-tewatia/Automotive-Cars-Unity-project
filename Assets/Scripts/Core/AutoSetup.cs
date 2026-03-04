@@ -94,53 +94,76 @@ public class AutoSetup : MonoBehaviour
         if (GameManager.Instance != null)
             GameManager.Instance.availableCars.Clear();
 
-        // ─── Car 1: Original Primitive Car (left side) ───
+        var createdCars = new System.Collections.Generic.List<CarCustomizer>();
+
+        // Car 1: Original primitive car
         GameObject primitiveCar = CreatePrimitiveCar();
         primitiveCar.name = "Classic Sedan";
         primitiveCar.transform.SetParent(carParent.transform, false);
-        primitiveCar.transform.localPosition = new Vector3(-4.5f, 0.15f, 0f);
-        primitiveCar.transform.localRotation = Quaternion.Euler(0f, 15f, 0f);
-
         CarCustomizer primCust = primitiveCar.GetComponent<CarCustomizer>();
-        if (primCust != null && GameManager.Instance != null)
-            GameManager.Instance.availableCars.Add(primCust);
+        if (primCust != null)
+        {
+            primCust.useAdaptiveWheelFit = false;
+            createdCars.Add(primCust);
+        }
 
-        // ─── Car 2: Sport Car Free (right side) ───
+        // Car 2: Existing Sport GT
         GameObject sportCar = CreateSportCar();
         if (sportCar != null)
         {
             sportCar.name = "Sport GT";
             sportCar.transform.SetParent(carParent.transform, false);
-            sportCar.transform.localPosition = new Vector3(4.5f, 0f, 0f);
-            sportCar.transform.localRotation = Quaternion.Euler(0f, -15f, 0f);
-
             CarCustomizer sportCust = sportCar.GetComponent<CarCustomizer>();
-            if (sportCust != null && GameManager.Instance != null)
-                GameManager.Instance.availableCars.Add(sportCust);
+            if (sportCust != null)
+            {
+                sportCust.useAdaptiveWheelFit = true;
+                createdCars.Add(sportCust);
+            }
         }
 
-        // ─── Load Wheel Prefabs from Low Poly 3D Wheel Pack ───
+        // Additional imported car packs
+        GameObject[] extraCarPrefabs = LoadAdditionalCarPrefabs();
+        foreach (GameObject extraPrefab in extraCarPrefabs)
+        {
+            if (extraPrefab == null) continue;
+
+            GameObject extraCar = CreateImportedCarFromPrefab(extraPrefab);
+            if (extraCar == null) continue;
+
+            extraCar.name = GetDisplayNameFromPrefabName(extraPrefab.name);
+            extraCar.transform.SetParent(carParent.transform, false);
+
+            CarCustomizer extraCust = extraCar.GetComponent<CarCustomizer>();
+            if (extraCust != null)
+            {
+                extraCust.useAdaptiveWheelFit = true;
+                createdCars.Add(extraCust);
+            }
+        }
+
+        ArrangeCarsInShowroom(createdCars);
+
+        if (GameManager.Instance != null)
+        {
+            foreach (CarCustomizer cust in createdCars)
+            {
+                if (cust != null)
+                    GameManager.Instance.availableCars.Add(cust);
+            }
+        }
+
+        // Load wheel prefabs and setup swapping on every car
         GameObject[] wheelPrefabs = LoadWheelPrefabs();
         if (wheelPrefabs != null && wheelPrefabs.Length > 0)
         {
             Debug.Log($"[AutoSetup] Loaded {wheelPrefabs.Length} wheel prefabs from wheel pack!");
-
-            // Primitive car should still swap wheel prefabs,
-            // but without adaptive wheel width fitting.
-            if (primCust != null)
+            foreach (CarCustomizer cust in createdCars)
             {
-                primCust.useAdaptiveWheelFit = false;
-                SetupWheelMountPoints(primitiveCar, primCust, wheelPrefabs);
-            }
+                if (cust == null) continue;
 
-            // Setup wheel mount points for sport car
-            if (sportCar != null)
-            {
-                CarCustomizer sportCust2 = sportCar.GetComponent<CarCustomizer>();
-                if (sportCust2 != null)
-                {
-                    SetupWheelMountPoints(sportCar, sportCust2, wheelPrefabs);
-                }
+                // Primitive car keeps non-adaptive wheel fit.
+                cust.useAdaptiveWheelFit = cust != primCust;
+                SetupWheelMountPoints(cust.gameObject, cust, wheelPrefabs);
             }
         }
 
@@ -160,21 +183,32 @@ public class AutoSetup : MonoBehaviour
             return null;
         }
 
-        GameObject car = Instantiate(carPrefab);
-        car.name = "SportCar";
+        GameObject car = CreateImportedCarFromPrefab(carPrefab);
+        if (car != null)
+            car.name = "SportCar";
 
-        // CRITICAL: Force-instance all materials so we can change colors at runtime.
-        // Without this, shared materials won't update per-instance.
+        Debug.Log("[AutoSetup] Sport Car Free (SportCar_1) loaded and materials instanced.");
+        return car;
+    }
+
+    /// <summary>
+    /// Instantiate any imported car prefab and configure it for runtime customization.
+    /// </summary>
+    private GameObject CreateImportedCarFromPrefab(GameObject carPrefab)
+    {
+        if (carPrefab == null) return null;
+
+        GameObject car = Instantiate(carPrefab);
+        car.name = carPrefab.name;
+
+        // Force per-instance material copies so each car can be customized independently.
         ForceInstantiateMaterials(car);
 
-        // Auto-detect and assign renderers
         CarCustomizer customizer = car.GetComponent<CarCustomizer>();
         if (customizer == null)
             customizer = car.AddComponent<CarCustomizer>();
 
         AutoAssignCarRenderers(car, customizer);
-
-        Debug.Log("[AutoSetup] ✅ Sport Car Free (SportCar_1) loaded and materials instanced!");
         return car;
     }
 
@@ -360,6 +394,142 @@ public class AutoSetup : MonoBehaviour
     }
 
     /// <summary>
+    /// Discover extra car prefabs from imported packs.
+    /// </summary>
+    private GameObject[] LoadAdditionalCarPrefabs()
+    {
+        var prefabs = new System.Collections.Generic.List<GameObject>();
+
+#if UNITY_EDITOR
+        var seenPaths = new System.Collections.Generic.HashSet<string>();
+        string[] searchFolders =
+        {
+            "Assets/ARCADE - FREE Racing Car/Prefabs (Meshes Only)",
+            "Assets/Azerilo/Car Model No.1201 Asset/Prefab"
+        };
+
+        foreach (string folder in searchFolders)
+        {
+            if (!UnityEditor.AssetDatabase.IsValidFolder(folder))
+                continue;
+
+            string[] guids = UnityEditor.AssetDatabase.FindAssets("t:Prefab", new[] { folder });
+            foreach (string guid in guids)
+            {
+                string path = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
+                string fileName = System.IO.Path.GetFileNameWithoutExtension(path).ToLower().Trim();
+                string pathLower = path.ToLower();
+
+                // Skip non-car prefabs and wheel-only assets
+                if (fileName.Contains("wheel"))
+                    continue;
+                if (!(fileName.Contains("car") || fileName.Contains("vehicle") || fileName.Contains("racing")))
+                    continue;
+
+                // Avoid duplicate packs and previously loaded built-in sport car
+                if (pathLower.Contains("prefabs (with colliders)"))
+                    continue;
+                if (fileName == "sportcar_1")
+                    continue;
+
+                if (!seenPaths.Add(path))
+                    continue;
+
+                GameObject prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (prefab != null)
+                    prefabs.Add(prefab);
+            }
+        }
+#endif
+
+        prefabs.Sort((a, b) => string.Compare(a.name, b.name, System.StringComparison.OrdinalIgnoreCase));
+        if (prefabs.Count > 0)
+            Debug.Log($"[AutoSetup] Loaded {prefabs.Count} additional car prefabs from imported packs.");
+
+        return prefabs.ToArray();
+    }
+
+    private string GetDisplayNameFromPrefabName(string prefabName)
+    {
+        if (string.IsNullOrWhiteSpace(prefabName))
+            return "Custom Car";
+
+        string cleaned = prefabName.Replace("_", " ").Replace("-", " ").Trim();
+        while (cleaned.Contains("  "))
+            cleaned = cleaned.Replace("  ", " ");
+
+        if (cleaned.Equals("SportCar 1", System.StringComparison.OrdinalIgnoreCase))
+            return "Sport GT";
+
+        return cleaned;
+    }
+
+    /// <summary>
+    /// Place cars in a staggered grid so the showroom looks intentional with many models.
+    /// </summary>
+    private void ArrangeCarsInShowroom(System.Collections.Generic.List<CarCustomizer> cars)
+    {
+        if (cars == null || cars.Count == 0)
+            return;
+
+        int count = cars.Count;
+        int columns = Mathf.Clamp(Mathf.CeilToInt(Mathf.Sqrt(count)), 2, 4);
+        int rows = Mathf.CeilToInt((float)count / columns);
+
+        float xSpacing = 5.8f;
+        float zSpacing = 7.2f;
+        float zStart = -((rows - 1) * zSpacing * 0.5f);
+
+        int index = 0;
+        for (int row = 0; row < rows; row++)
+        {
+            int rowCount = Mathf.Min(columns, count - row * columns);
+            float xStart = -((rowCount - 1) * xSpacing * 0.5f);
+            float stagger = (row % 2 == 1 && rowCount > 1) ? xSpacing * 0.25f : 0f;
+
+            for (int col = 0; col < rowCount; col++)
+            {
+                CarCustomizer car = cars[index++];
+                if (car == null) continue;
+
+                Transform tr = car.transform;
+                float x = xStart + col * xSpacing + stagger;
+                float z = zStart + row * zSpacing;
+
+                tr.localPosition = new Vector3(x, 0f, z);
+
+                float inwardYaw = Mathf.Clamp(-x * 3f, -20f, 20f);
+                float rowYaw = (row % 2 == 0) ? 5f : -5f;
+                tr.localRotation = Quaternion.Euler(0f, inwardYaw + rowYaw, 0f);
+
+                SnapCarToGround(car.gameObject, 0.02f);
+            }
+        }
+    }
+
+    private void SnapCarToGround(GameObject car, float groundY)
+    {
+        if (car == null) return;
+
+        Renderer[] renderers = car.GetComponentsInChildren<Renderer>(true);
+        if (renderers == null || renderers.Length == 0)
+            return;
+
+        float minY = float.PositiveInfinity;
+        foreach (Renderer rend in renderers)
+        {
+            if (rend == null) continue;
+            minY = Mathf.Min(minY, rend.bounds.min.y);
+        }
+
+        if (float.IsInfinity(minY))
+            return;
+
+        float offset = groundY - minY;
+        car.transform.position += Vector3.up * offset;
+    }
+
+    /// <summary>
     /// Auto-detect renderers from the SportCar_1 model by material names.
     /// </summary>
     private void AutoAssignCarRenderers(GameObject car, CarCustomizer customizer)
@@ -377,45 +547,84 @@ public class AutoSetup : MonoBehaviour
         foreach (Renderer rend in allRenderers)
         {
             if (rend == null) continue;
-            
-            // Log child name if needed for debugging missing parts
-            // Debug.Log($"[AutoSetup] Scanning renderer: {rend.gameObject.name}");
+
+            string objectName = rend.gameObject.name.ToLower().Trim();
+            bool isBody = false;
+            bool isWindow = false;
+            bool isWheel = false;
+            bool isTire = false;
+            bool isLight = false;
+            bool isInterior = false;
+            bool isBrake = false;
 
             foreach (Material mat in rend.sharedMaterials)
             {
                 if (mat == null) continue;
                 string matName = mat.name.ToLower().Replace(" (instance)", "").Trim();
 
-                // Body detection
-                if (matName.Contains("body") || matName.Contains("paint") || matName.Contains("mirror"))
-                {
-                    if (!bodyList.Contains(rend)) bodyList.Add(rend);
-                }
-                // Windows
-                else if (matName.Contains("glass") || matName.Contains("window"))
-                {
-                    if (!windowList.Contains(rend)) windowList.Add(rend);
-                }
-                // Tires (usually stay dark)
-                else if (matName.Contains("tire") || matName.Contains("rubber"))
-                {
-                    if (!tireList.Contains(rend)) tireList.Add(rend);
-                }
-                // Wheels/Rims/Rings (the part that changes color)
-                else if (matName.Contains("wheel") || matName.Contains("ring") || matName.Contains("rim"))
-                {
-                    if (!wheelList.Contains(rend)) wheelList.Add(rend);
-                }
-                // Lights
-                else if (matName.Contains("light") || matName.Contains("emission") || matName.Contains("led") || matName.Contains("frontlight") || matName.Contains("rearlight"))
-                {
-                    if (!headlightList.Contains(rend)) headlightList.Add(rend);
-                }
-                // Interior
-                else if (matName.Contains("interior") || matName.Contains("seat") || matName.Contains("dash"))
-                {
-                    if (!interiorList.Contains(rend)) interiorList.Add(rend);
-                }
+                if (ContainsAnyToken(matName, "body", "paint", "mirror", "bodymat", "mainmat"))
+                    isBody = true;
+                else if (ContainsAnyToken(matName, "glass", "window", "windshield"))
+                    isWindow = true;
+                else if (ContainsAnyToken(matName, "tire", "tyre", "rubber"))
+                    isTire = true;
+                else if (ContainsAnyToken(matName, "wheel", "ring", "rim", "disc", "disk"))
+                    isWheel = true;
+                else if (ContainsAnyToken(matName, "light", "emission", "led", "head", "tail", "lamp", "rearlight", "frontlight"))
+                    isLight = true;
+                else if (ContainsAnyToken(matName, "interior", "seat", "dash", "cockpit", "bottom"))
+                    isInterior = true;
+                else if (ContainsAnyToken(matName, "brake", "caliper", "calliper", "disk"))
+                    isBrake = true;
+            }
+
+            // Fallback by renderer object name when material names are generic.
+            if (!isBody && ContainsAnyToken(objectName, "body", "hood", "roof", "door", "fender", "bumper", "spoiler", "shell"))
+                isBody = true;
+            if (!isWindow && ContainsAnyToken(objectName, "glass", "window", "windshield"))
+                isWindow = true;
+            if (!isTire && ContainsAnyToken(objectName, "tire", "tyre", "rubber"))
+                isTire = true;
+            if (!isWheel && ContainsAnyToken(objectName, "wheel", "rim", "ring", "disc", "disk"))
+                isWheel = true;
+            if (!isLight && ContainsAnyToken(objectName, "light", "head", "tail", "lamp"))
+                isLight = true;
+            if (!isInterior && ContainsAnyToken(objectName, "interior", "seat", "dash", "cockpit"))
+                isInterior = true;
+            if (!isBrake && ContainsAnyToken(objectName, "brake", "caliper", "calliper", "disk"))
+                isBrake = true;
+
+            if (isWindow && !windowList.Contains(rend)) windowList.Add(rend);
+            if (isWheel && !wheelList.Contains(rend)) wheelList.Add(rend);
+            if (isTire && !tireList.Contains(rend)) tireList.Add(rend);
+            if (isLight && !headlightList.Contains(rend)) headlightList.Add(rend);
+            if (isInterior && !interiorList.Contains(rend)) interiorList.Add(rend);
+            if (isBrake && !brakeList.Contains(rend)) brakeList.Add(rend);
+
+            if (isBody && !bodyList.Contains(rend))
+                bodyList.Add(rend);
+        }
+
+        // Fallback: if body couldn't be inferred, use uncategorized renderers.
+        if (bodyList.Count == 0)
+        {
+            foreach (Renderer rend in allRenderers)
+            {
+                if (rend == null) continue;
+                if (windowList.Contains(rend) || wheelList.Contains(rend) || tireList.Contains(rend) ||
+                    headlightList.Contains(rend) || interiorList.Contains(rend) || brakeList.Contains(rend))
+                    continue;
+
+                bodyList.Add(rend);
+            }
+        }
+
+        if (bodyList.Count == 0)
+        {
+            foreach (Renderer rend in allRenderers)
+            {
+                if (rend != null && !bodyList.Contains(rend))
+                    bodyList.Add(rend);
             }
         }
 
@@ -427,20 +636,22 @@ public class AutoSetup : MonoBehaviour
         customizer.interiorRenderers = interiorList.ToArray();
         customizer.brakeCalliperRenderers = brakeList.ToArray();
 
-        Debug.Log($"[AutoSetup] Car renderers assigned — " +
-                  $"Body: {bodyList.Count}, Windows: {windowList.Count}, " +
-                  $"Tires: {tireList.Count}, Wheels: {wheelList.Count}, Lights: {headlightList.Count}, " +
-                  $"Interior: {interiorList.Count}");
+        Debug.Log($"[AutoSetup] Car renderers assigned -> Body: {bodyList.Count}, Windows: {windowList.Count}, Tires: {tireList.Count}, Wheels: {wheelList.Count}, Lights: {headlightList.Count}, Interior: {interiorList.Count}, Brakes: {brakeList.Count}");
     }
 
-    // ═══════════════════════════════════════════════════════
-    //  WHEEL PREFAB LOADING (Low Poly 3D Wheel Pack)
-    // ═══════════════════════════════════════════════════════
+    private static bool ContainsAnyToken(string source, params string[] tokens)
+    {
+        if (string.IsNullOrEmpty(source) || tokens == null || tokens.Length == 0)
+            return false;
 
-    /// <summary>
-    /// Load all wheel prefabs from the Low Poly 3D Wheel Model Pack.
-    /// Searches Assets/wheel/Prefabs/ for wheel_01 through wheel_12.
-    /// </summary>
+        foreach (string token in tokens)
+        {
+            if (!string.IsNullOrEmpty(token) && source.Contains(token))
+                return true;
+        }
+        return false;
+    }
+
     private GameObject[] LoadWheelPrefabs()
     {
         var wheelPrefabs = new System.Collections.Generic.List<GameObject>();
@@ -540,7 +751,9 @@ public class AutoSetup : MonoBehaviour
         // Try finding by common wheel names
         string[] wheelSearchNames = { "Wheel_0", "Wheel_1", "Wheel_2", "Wheel_3",
                                       "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr",
+                                      "Wheel_FL", "Wheel_FR", "Wheel_RL", "Wheel_RR",
                                       "WheelFL", "WheelFR", "WheelRL", "WheelRR",
+                                      "FrontLeftWheel", "FrontRightWheel", "RearLeftWheel", "RearRightWheel",
                                       "FL", "FR", "RL", "RR",
                                       "fl", "fr", "rl", "rr" };
 
@@ -565,7 +778,7 @@ public class AutoSetup : MonoBehaviour
             foreach (Transform child in car.GetComponentsInChildren<Transform>(true))
             {
                 string childName = child.name.ToLower();
-                if ((childName.Contains("wheel") || childName.Contains("rim") || childName.Contains("ring"))
+                if ((childName.Contains("wheel") || childName.Contains("rim") || childName.Contains("ring") || childName.Contains("tire") || childName.Contains("tyre"))
                     && !childName.Contains("mount") && child != car.transform)
                 {
                     // Check if this is a top-level wheel container (not a sub-mesh)
@@ -574,7 +787,7 @@ public class AutoSetup : MonoBehaviour
                     while (parent != null && parent != car.transform)
                     {
                         string pName = parent.name.ToLower();
-                        if (pName.Contains("wheel") || pName.Contains("rim"))
+                        if (pName.Contains("wheel") || pName.Contains("rim") || pName.Contains("ring") || pName.Contains("tire") || pName.Contains("tyre"))
                         {
                             isTopLevel = false;
                             break;
@@ -1062,3 +1275,6 @@ public class AutoSetup : MonoBehaviour
         light.shadows = LightShadows.None;
     }
 }
+
+
+

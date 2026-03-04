@@ -156,7 +156,7 @@ public class UIBuilder : MonoBehaviour
                 Color c = colorPalette[index];
                 Button colorBtn = CreateColorSwatch(mainPanel.transform, $"Color_{index}",
                                                     c, new Vector2(x, y), new Vector2(48, 38));
-                colorBtn.onClick.AddListener(() => carCustomizer?.SetBodyColor(c));
+                colorBtn.onClick.AddListener(() => GetActiveCustomizer()?.SetBodyColor(c));
             }
         }
         yOffset -= 100;
@@ -176,11 +176,11 @@ public class UIBuilder : MonoBehaviour
 
         CreateSliderWithLabel(mainPanel.transform, "Metallic", new Vector2(0, yOffset),
                              new Color(0.7f, 0.7f, 0.8f), 0.7f,
-                             (v) => carCustomizer?.SetMetallic(v));
+                             (v) => GetActiveCustomizer()?.SetMetallic(v));
         yOffset -= 35;
         CreateSliderWithLabel(mainPanel.transform, "Smoothness", new Vector2(0, yOffset),
                              new Color(0.7f, 0.7f, 0.8f), 0.85f,
-                             (v) => carCustomizer?.SetSmoothness(v));
+                             (v) => GetActiveCustomizer()?.SetSmoothness(v));
         yOffset -= 45;
 
         Button resetBtn = CreateButton(mainPanel.transform, "ResetButton", "RESET",
@@ -638,7 +638,7 @@ public class UIBuilder : MonoBehaviour
         if (redSliderRef != null && greenSliderRef != null && blueSliderRef != null)
         {
             Color c = new Color(redSliderRef.value, greenSliderRef.value, blueSliderRef.value);
-            carCustomizer?.SetBodyColor(c);
+            GetActiveCustomizer()?.SetBodyColor(c);
         }
     }
 

@@ -51,6 +51,15 @@ public class CarCustomizer : MonoBehaviour
     private static readonly int GlossinessID = Shader.PropertyToID("_Glossiness");
     private static readonly int EmissionColorID = Shader.PropertyToID("_EmissionColor");
 
+    // Material-name filters to avoid recoloring unrelated sub-materials on multi-material renderers.
+    private static readonly string[] BodyMaterialTags = { "body", "paint", "mirror" };
+    private static readonly string[] WheelMaterialTags = { "wheel", "ring", "rim" };
+    private static readonly string[] TireMaterialTags = { "tire", "rubber" };
+    private static readonly string[] WindowMaterialTags = { "glass", "window" };
+    private static readonly string[] HeadlightMaterialTags = { "light", "headlight", "frontlight", "rearlight", "taillight", "led", "emission" };
+    private static readonly string[] InteriorMaterialTags = { "interior", "seat", "dash", "bottom_interior", "bottom&interior" };
+    private static readonly string[] BrakeMaterialTags = { "brake", "caliper", "calliper" };
+
     public void Initialize()
     {
         currentConfig = CarConfiguration.Default();
@@ -113,7 +122,7 @@ public class CarCustomizer : MonoBehaviour
     public void SetMetallic(float value)
     {
         currentConfig.metallicValue = Mathf.Clamp01(value);
-        ApplyColorToRenderers(bodyRenderers, currentConfig.bodyColor, currentConfig.metallicValue, currentConfig.smoothnessValue);
+        ApplyColorToRenderers(bodyRenderers, currentConfig.bodyColor, currentConfig.metallicValue, currentConfig.smoothnessValue, BodyMaterialTags);
     }
 
     /// <summary>
@@ -122,7 +131,7 @@ public class CarCustomizer : MonoBehaviour
     public void SetSmoothness(float value)
     {
         currentConfig.smoothnessValue = Mathf.Clamp01(value);
-        ApplyColorToRenderers(bodyRenderers, currentConfig.bodyColor, currentConfig.metallicValue, currentConfig.smoothnessValue);
+        ApplyColorToRenderers(bodyRenderers, currentConfig.bodyColor, currentConfig.metallicValue, currentConfig.smoothnessValue, BodyMaterialTags);
     }
 
     /// <summary>
@@ -217,7 +226,7 @@ public class CarCustomizer : MonoBehaviour
     public void SetWheelColor(Color color)
     {
         currentConfig.wheelColor = color;
-        ApplyColorToRenderers(wheelRenderers, color);
+        ApplyColorToRenderers(wheelRenderers, color, -1f, -1f, WheelMaterialTags);
     }
 
     /// <summary>
@@ -226,7 +235,7 @@ public class CarCustomizer : MonoBehaviour
     public void SetWindowTint(Color color)
     {
         currentConfig.windowTintColor = color;
-        ApplyColorToRenderers(windowRenderers, color);
+        ApplyColorToRenderers(windowRenderers, color, -1f, -1f, WindowMaterialTags);
     }
 
     /// <summary>
@@ -235,7 +244,7 @@ public class CarCustomizer : MonoBehaviour
     public void SetBrakeCalliperColor(Color color)
     {
         currentConfig.brakeCalliperColor = color;
-        ApplyColorToRenderers(brakeCalliperRenderers, color);
+        ApplyColorToRenderers(brakeCalliperRenderers, color, -1f, -1f, BrakeMaterialTags);
     }
 
     /// <summary>
@@ -258,25 +267,25 @@ public class CarCustomizer : MonoBehaviour
 
     private void ApplyConfigurationImmediate(CarConfiguration config)
     {
-        ApplyColorToRenderers(bodyRenderers, config.bodyColor, config.metallicValue, config.smoothnessValue);
-        ApplyColorToRenderers(wheelRenderers, config.wheelColor);
-        ApplyColorToRenderers(windowRenderers, config.windowTintColor);
-        ApplyColorToRenderers(headlightRenderers, config.headlightColor);
-        ApplyColorToRenderers(interiorRenderers, config.interiorColor);
-        ApplyColorToRenderers(brakeCalliperRenderers, config.brakeCalliperColor);
+        ApplyColorToRenderers(bodyRenderers, config.bodyColor, config.metallicValue, config.smoothnessValue, BodyMaterialTags);
+        ApplyColorToRenderers(wheelRenderers, config.wheelColor, -1f, -1f, WheelMaterialTags);
+        ApplyColorToRenderers(windowRenderers, config.windowTintColor, -1f, -1f, WindowMaterialTags);
+        ApplyColorToRenderers(headlightRenderers, config.headlightColor, -1f, -1f, HeadlightMaterialTags);
+        ApplyColorToRenderers(interiorRenderers, config.interiorColor, -1f, -1f, InteriorMaterialTags);
+        ApplyColorToRenderers(brakeCalliperRenderers, config.brakeCalliperColor, -1f, -1f, BrakeMaterialTags);
         
         // Fixed tires (dark grey) to ensure they are visible and distinct from rims
-        ApplyColorToRenderers(tireRenderers, new Color(0.12f, 0.12f, 0.14f), 0.1f, 0.3f);
+        ApplyColorToRenderers(tireRenderers, new Color(0.12f, 0.12f, 0.14f), 0.1f, 0.3f, TireMaterialTags);
 
         // Apply emission if any
         if (config.emissionIntensity > 0)
         {
-            ApplyEmission(bodyRenderers, config.emissionColor, config.emissionIntensity);
-            ApplyEmission(interiorRenderers, config.interiorColor, 0.5f); // Subdued interior glow
+            ApplyEmission(bodyRenderers, config.emissionColor, config.emissionIntensity, BodyMaterialTags);
+            ApplyEmission(interiorRenderers, config.interiorColor, 0.5f, InteriorMaterialTags); // Subdued interior glow
         }
     }
 
-    private void ApplyColorToRenderers(Renderer[] renderers, Color color, float metallic = -1f, float smoothness = -1f)
+    private void ApplyColorToRenderers(Renderer[] renderers, Color color, float metallic = -1f, float smoothness = -1f, params string[] materialNameFilters)
     {
         if (renderers == null) return;
 
@@ -286,11 +295,18 @@ public class CarCustomizer : MonoBehaviour
 
             // Accessing .materials (plural) creates/returns a copy of ALL material instances for this renderer
             Material[] mats = rend.materials;
+            bool useFilter = materialNameFilters != null && materialNameFilters.Length > 0;
+            bool hasFilterMatch = !useFilter || HasAnyMatchingMaterial(mats, materialNameFilters);
 
             for (int i = 0; i < mats.Length; i++)
             {
                 Material mat = mats[i];
                 if (mat == null) continue;
+
+                // If renderer has at least one matching material, only modify the matching subset.
+                // If it has none, fall back to legacy behavior and modify all materials.
+                if (useFilter && hasFilterMatch && !MaterialNameMatches(mat, materialNameFilters))
+                    continue;
 
                 // Try URP/HDRP property first, then Standard
                 if (mat.HasProperty(BaseColorID))
@@ -315,7 +331,7 @@ public class CarCustomizer : MonoBehaviour
         }
     }
 
-    private void ApplyEmission(Renderer[] renderers, Color emissionColor, float intensity)
+    private void ApplyEmission(Renderer[] renderers, Color emissionColor, float intensity, params string[] materialNameFilters)
     {
         if (renderers == null) return;
 
@@ -324,16 +340,47 @@ public class CarCustomizer : MonoBehaviour
             if (rend == null) continue;
 
             Material[] mats = rend.materials;
+            bool useFilter = materialNameFilters != null && materialNameFilters.Length > 0;
+            bool hasFilterMatch = !useFilter || HasAnyMatchingMaterial(mats, materialNameFilters);
             for (int i = 0; i < mats.Length; i++)
             {
                 Material mat = mats[i];
                 if (mat == null) continue;
+                if (useFilter && hasFilterMatch && !MaterialNameMatches(mat, materialNameFilters))
+                    continue;
 
                 mat.EnableKeyword("_EMISSION");
                 mat.SetColor(EmissionColorID, emissionColor * intensity);
             }
             rend.materials = mats;
         }
+    }
+
+    private bool HasAnyMatchingMaterial(Material[] mats, string[] materialNameFilters)
+    {
+        if (mats == null || materialNameFilters == null || materialNameFilters.Length == 0)
+            return false;
+
+        foreach (Material mat in mats)
+        {
+            if (MaterialNameMatches(mat, materialNameFilters))
+                return true;
+        }
+        return false;
+    }
+
+    private bool MaterialNameMatches(Material mat, string[] materialNameFilters)
+    {
+        if (mat == null || materialNameFilters == null || materialNameFilters.Length == 0)
+            return false;
+
+        string materialName = mat.name.ToLower().Replace(" (instance)", "").Trim();
+        foreach (string token in materialNameFilters)
+        {
+            if (!string.IsNullOrEmpty(token) && materialName.Contains(token))
+                return true;
+        }
+        return false;
     }
 
     private Vector3 GetReferenceWheelSize(Transform mountPoint, Transform carRoot)
